@@ -1,0 +1,17 @@
+# Entorno virtual
+venv/
+env/
+__pycache__/
+*.pyc
+
+# Modelo entrenado (se regenera automáticamente)
+modelo_cnn.pt
+vectorizer.pkl
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
