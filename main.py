@@ -199,8 +199,19 @@ def clasificar_documento(documento: DocumentoEntrada):
 
 
 @app.get("/historial", response_model=list[RegistroHistorial], tags=["Historial"])
-def obtener_historial(categoria: Optional[str] = None, solo_alertas: Optional[bool] = False):
-    """Devuelve el historial de documentos procesados, más reciente primero."""
+def obtener_historial(
+    categoria: Optional[str] = None,
+    solo_alertas: Optional[bool] = False,
+    fecha: Optional[str] = None,
+    score_minimo: Optional[float] = None,
+):
+    """
+    Devuelve el historial de documentos procesados, más reciente primero.
+
+    Filtrable por **categoría** (coincidencia parcial), **fecha** (formato YYYY-MM-DD),
+    **score_minimo** (score de confianza mínimo, 0-1) y **solo_alertas** (solo documentos
+    marcados para revisión manual).
+    """
     conn = obtener_conexion()
     filas = conn.execute("SELECT * FROM documentos ORDER BY id DESC").fetchall()
     conn.close()
@@ -211,6 +222,10 @@ def obtener_historial(categoria: Optional[str] = None, solo_alertas: Optional[bo
         if categoria and categoria.lower() not in nombre_cat.lower():
             continue
         if solo_alertas and not f["alerta_revision_manual"]:
+            continue
+        if fecha and not f["timestamp"].startswith(fecha):
+            continue
+        if score_minimo is not None and f["score_confianza"] < score_minimo:
             continue
         resultado.append(RegistroHistorial(
             id=f["id"],

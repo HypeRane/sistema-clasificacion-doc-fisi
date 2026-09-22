@@ -1,0 +1,11 @@
+Hemograma completo: Hb 11.2 g/dL, leucocitos 8500/mm3. Resultado dentro de rangos normales.
+Paciente ingresa por emergencia con dolor abdominal agudo de 6 horas de evolución.
+Radiografía de tórax: cardiomegalia leve. Sin derrame pleural.
+Evolución: paciente refiere mejoría del dolor. Afebril. Herida quirúrgica sin signos de infección.
+
+python -m venv venv
+venv\Scripts\activate
+pip install fastapi uvicorn torch scikit-learn numpy pydantic
+
+Python main.py
+http://localhost:8000
