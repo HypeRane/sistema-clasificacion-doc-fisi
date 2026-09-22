@@ -17,7 +17,7 @@ Este sistema utiliza una arquitectura CNN entrenada sobre texto de solicitudes F
 - Trámites de Grados y Títulos
 - Solicitudes Administrativas Generales
 
-El sistema expone sus funcionalidades mediante una **API REST desarrollada con FastAPI**, con documentación interactiva automática (Swagger UI) y una interfaz web para la clasificación de documentos.
+El sistema expone sus funcionalidades mediante una **API REST desarrollada con FastAPI**, con documentación interactiva automática (Swagger UI) y una interfaz web para la clasificación de documentos. Además de la categoría y el score de confianza, cada clasificación devuelve los **términos TF-IDF que más influyeron** en la predicción, como elemento de explicabilidad del modelo.
 
 ---
 
@@ -29,6 +29,8 @@ El sistema expone sus funcionalidades mediante una **API REST desarrollada con F
 | Modelo CNN | PyTorch |
 | API REST | FastAPI + Uvicorn |
 | Vectorización | scikit-learn (TF-IDF) |
+| Persistencia | SQLite |
+| Visualización | Chart.js |
 | Documentación | Swagger UI (OpenAPI) |
 
 ---
@@ -75,9 +77,10 @@ El sistema entrenará automáticamente el modelo CNN en el primer arranque y que
 |---|---|---|
 | `POST` | `/clasificar` | Clasifica un documento administrativo-académico |
 | `GET` | `/historial` | Historial de documentos procesados |
+| `GET` | `/historial/exportar` | Exporta el historial completo como CSV |
 | `GET` | `/metricas` | Métricas de rendimiento del sistema |
 | `GET` | `/alertas` | Documentos que requieren revisión manual |
-| `PUT` | `/categorias` | Categorías de clasificación configuradas |
+| `PUT` | `/categorias` | Sin cuerpo: consulta las categorías activas. Con cuerpo `{"categorias": [...]}`: las renombra (el número de clases está fijado por el modelo entrenado) |
 
 ---
 
@@ -85,9 +88,9 @@ El sistema entrenará automáticamente el modelo CNN en el primer arranque y que
 
 El sistema sigue una arquitectura en tres capas:
 
-- **Capa de presentación:** API REST con FastAPI + interfaz web
+- **Capa de presentación:** API REST con FastAPI + interfaz web con gráficos (Chart.js)
 - **Capa de procesamiento:** Motor CNN con PyTorch
-- **Capa de datos:** Historial de predicciones y métricas
+- **Capa de datos:** Historial de predicciones persistido en SQLite (`historial.db`) y configuración de categorías en `categorias.json`
 
 ---
 

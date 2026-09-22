@@ -8,6 +8,10 @@ __pycache__/
 modelo_cnn.pt
 vectorizer.pkl
 
+# Estado en tiempo de ejecución (se regenera automáticamente)
+historial.db
+categorias.json
+
 # Archivos del sistema
 .DS_Store
 Thumbs.db

@@ -161,12 +161,21 @@ def clasificar(texto: str, modelo, vectorizer) -> dict:
         probs = torch.softmax(output, dim=1)
         score, pred = torch.max(probs, dim=1)
 
-    categoria = CATEGORIAS[pred.item()]
+    categoria_id = pred.item()
+    categoria = CATEGORIAS[categoria_id]
     confianza = round(score.item(), 4)
     alerta = confianza < 0.60
 
+    # Explicabilidad: términos con mayor peso TF-IDF presentes en el texto de entrada.
+    vector_fila = X[0]
+    nombres_terminos = vectorizer.get_feature_names_out()
+    indices_top = np.argsort(vector_fila)[::-1]
+    terminos_clave = [nombres_terminos[i] for i in indices_top if vector_fila[i] > 0][:5]
+
     return {
         "categoria": categoria,
+        "categoria_id": categoria_id,
         "score_confianza": confianza,
-        "alerta_revision_manual": alerta
+        "alerta_revision_manual": alerta,
+        "terminos_clave": terminos_clave
     }

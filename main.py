@@ -6,13 +6,19 @@ Autor: Ortiz Herrera, Fabrizio Peter
 """
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 from modelo import cargar_modelo, clasificar, CATEGORIAS
 import uvicorn
 import time
+import os
+import json
+import csv
+import io
+import sqlite3
 
 app = FastAPI(
     title="Sistema de Clasificación Automatizada de Documentos Administrativo-Académicos",
@@ -31,16 +37,68 @@ automáticamente documentos administrativo-académicos en cinco categorías:
 
 **Universidad Nacional Mayor de San Marcos — FISI | Tesis de pregrado 2025**
     """,
-    version="1.1.0",
+    version="1.2.0",
     contact={"name": "Ortiz Herrera, Fabrizio Peter", "email": "fabrizio.ortiz@unmsm.edu.pe"}
 )
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 print("Iniciando sistema...")
 modelo_cnn, vectorizer = cargar_modelo()
 print("Sistema listo.")
 
-historial = []
-tiempos_inferencia = []
+# ── Persistencia de categorías (renombrables sin reentrenar el modelo) ─────────
+CATEGORIAS_PATH = "categorias.json"
+
+def cargar_categorias_actuales() -> list[str]:
+    if os.path.exists(CATEGORIAS_PATH):
+        try:
+            with open(CATEGORIAS_PATH, "r", encoding="utf-8") as f:
+                datos = json.load(f)
+            if isinstance(datos, list) and len(datos) == len(CATEGORIAS) and all(isinstance(c, str) for c in datos):
+                return datos
+        except (json.JSONDecodeError, OSError):
+            pass
+    return list(CATEGORIAS)
+
+def guardar_categorias(categorias: list[str]) -> None:
+    with open(CATEGORIAS_PATH, "w", encoding="utf-8") as f:
+        json.dump(categorias, f, ensure_ascii=False, indent=2)
+
+categorias_actuales = cargar_categorias_actuales()
+
+def nombre_categoria(idx: int) -> str:
+    if 0 <= idx < len(categorias_actuales):
+        return categorias_actuales[idx]
+    return f"Categoría {idx}"
+
+
+# ── Persistencia del historial (SQLite) ─────────────────────────────────────────
+DB_PATH = "historial.db"
+
+def obtener_conexion() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def inicializar_db() -> None:
+    conn = obtener_conexion()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS documentos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            texto_fragmento TEXT NOT NULL,
+            categoria_id INTEGER NOT NULL,
+            score_confianza REAL NOT NULL,
+            alerta_revision_manual INTEGER NOT NULL,
+            tiempo_inferencia_ms REAL NOT NULL,
+            terminos_clave TEXT,
+            timestamp TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+inicializar_db()
 
 
 class DocumentoEntrada(BaseModel):
@@ -52,6 +110,7 @@ class ResultadoClasificacion(BaseModel):
     categoria: str
     score_confianza: float
     alerta_revision_manual: bool
+    terminos_clave: list[str]
     tiempo_inferencia_ms: float
     timestamp: str
 
@@ -61,6 +120,7 @@ class RegistroHistorial(BaseModel):
     categoria: str
     score_confianza: float
     alerta_revision_manual: bool
+    tiempo_inferencia_ms: float
     timestamp: str
 
 class MetricasSistema(BaseModel):
@@ -78,6 +138,10 @@ class AlertaDetalle(BaseModel):
     categoria_asignada: str
     timestamp: str
 
+class CategoriasUpdate(BaseModel):
+    categorias: list[str] = Field(...,
+        description="Nuevos nombres para las 5 categorías, en el mismo orden de clases del modelo entrenado (no se pueden agregar ni quitar sin reentrenar).")
+
 
 @app.get("/", response_class=HTMLResponse, tags=["Interfaz"], include_in_schema=False)
 def interfaz_web():
@@ -89,7 +153,7 @@ def interfaz_web():
 def estado():
     """Verifica que el sistema está activo."""
     return {"sistema": "Clasificación Automatizada de Documentos Administrativo-Académicos",
-            "estado": "activo", "version": "1.1.0", "documentacion": "/docs"}
+            "estado": "activo", "version": "1.2.0", "documentacion": "/docs"}
 
 
 @app.post("/clasificar", response_model=ResultadoClasificacion, tags=["Clasificación"])
@@ -98,7 +162,8 @@ def clasificar_documento(documento: DocumentoEntrada):
     Clasifica un documento administrativo-académico en una de las cinco categorías definidas.
 
     - Recibe el **texto** de la solicitud o documento
-    - Devuelve la **categoría asignada**, el **score de confianza** (0-1)
+    - Devuelve la **categoría asignada**, el **score de confianza** (0-1) y los **términos clave**
+      (TF-IDF) que más influyeron en la predicción
     - Incluye el **tiempo de inferencia** en milisegundos
     - Si el score es menor a 0.60, genera una **alerta de revisión manual**
     """
@@ -106,23 +171,26 @@ def clasificar_documento(documento: DocumentoEntrada):
         inicio = time.perf_counter()
         resultado = clasificar(documento.texto, modelo_cnn, vectorizer)
         tiempo_ms = round((time.perf_counter() - inicio) * 1000, 2)
-        tiempos_inferencia.append(tiempo_ms)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        categoria_id = resultado["categoria_id"]
+        categoria_nombre = nombre_categoria(categoria_id)
+        texto_fragmento = documento.texto[:80] + "..." if len(documento.texto) > 80 else documento.texto
 
-        registro = {
-            "id": len(historial) + 1,
-            "texto_fragmento": documento.texto[:80] + "..." if len(documento.texto) > 80 else documento.texto,
-            "categoria": resultado["categoria"],
-            "score_confianza": resultado["score_confianza"],
-            "alerta_revision_manual": resultado["alerta_revision_manual"],
-            "timestamp": timestamp
-        }
-        historial.append(registro)
+        conn = obtener_conexion()
+        conn.execute(
+            "INSERT INTO documentos (texto_fragmento, categoria_id, score_confianza, alerta_revision_manual, "
+            "tiempo_inferencia_ms, terminos_clave, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (texto_fragmento, categoria_id, resultado["score_confianza"], int(resultado["alerta_revision_manual"]),
+             tiempo_ms, ",".join(resultado["terminos_clave"]), timestamp)
+        )
+        conn.commit()
+        conn.close()
 
         return ResultadoClasificacion(
-            categoria=resultado["categoria"],
+            categoria=categoria_nombre,
             score_confianza=resultado["score_confianza"],
             alerta_revision_manual=resultado["alerta_revision_manual"],
+            terminos_clave=resultado["terminos_clave"],
             tiempo_inferencia_ms=tiempo_ms,
             timestamp=timestamp
         )
@@ -132,47 +200,119 @@ def clasificar_documento(documento: DocumentoEntrada):
 
 @app.get("/historial", response_model=list[RegistroHistorial], tags=["Historial"])
 def obtener_historial(categoria: Optional[str] = None, solo_alertas: Optional[bool] = False):
-    """Devuelve el historial de documentos procesados."""
-    resultado = historial.copy()
-    if categoria:
-        resultado = [r for r in resultado if categoria.lower() in r["categoria"].lower()]
-    if solo_alertas:
-        resultado = [r for r in resultado if r["alerta_revision_manual"]]
-    return list(reversed(resultado))
+    """Devuelve el historial de documentos procesados, más reciente primero."""
+    conn = obtener_conexion()
+    filas = conn.execute("SELECT * FROM documentos ORDER BY id DESC").fetchall()
+    conn.close()
+
+    resultado = []
+    for f in filas:
+        nombre_cat = nombre_categoria(f["categoria_id"])
+        if categoria and categoria.lower() not in nombre_cat.lower():
+            continue
+        if solo_alertas and not f["alerta_revision_manual"]:
+            continue
+        resultado.append(RegistroHistorial(
+            id=f["id"],
+            texto_fragmento=f["texto_fragmento"],
+            categoria=nombre_cat,
+            score_confianza=f["score_confianza"],
+            alerta_revision_manual=bool(f["alerta_revision_manual"]),
+            tiempo_inferencia_ms=f["tiempo_inferencia_ms"],
+            timestamp=f["timestamp"]
+        ))
+    return resultado
+
+
+@app.get("/historial/exportar", tags=["Historial"])
+def exportar_historial_csv():
+    """Exporta el historial completo de clasificaciones como archivo CSV."""
+    conn = obtener_conexion()
+    filas = conn.execute("SELECT * FROM documentos ORDER BY id").fetchall()
+    conn.close()
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["id", "texto_fragmento", "categoria", "score_confianza",
+                      "alerta_revision_manual", "tiempo_inferencia_ms", "terminos_clave", "timestamp"])
+    for f in filas:
+        writer.writerow([
+            f["id"], f["texto_fragmento"], nombre_categoria(f["categoria_id"]), f["score_confianza"],
+            bool(f["alerta_revision_manual"]), f["tiempo_inferencia_ms"], f["terminos_clave"], f["timestamp"]
+        ])
+    buffer.seek(0)
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=historial_clasificaciones.csv"}
+    )
 
 
 @app.get("/metricas", response_model=MetricasSistema, tags=["Monitoreo"])
 def obtener_metricas():
     """Devuelve métricas de rendimiento del sistema."""
-    total = len(historial)
-    alertas = sum(1 for r in historial if r["alerta_revision_manual"])
+    conn = obtener_conexion()
+    filas = conn.execute("SELECT categoria_id, alerta_revision_manual, tiempo_inferencia_ms FROM documentos").fetchall()
+    conn.close()
+
+    total = len(filas)
+    alertas = sum(1 for f in filas if f["alerta_revision_manual"])
     porcentaje = round((alertas / total * 100), 2) if total > 0 else 0.0
-    distribucion = {cat: 0 for cat in CATEGORIAS}
-    for r in historial:
-        distribucion[r["categoria"]] += 1
-    tiempo_prom = round(sum(tiempos_inferencia) / len(tiempos_inferencia), 2) if tiempos_inferencia else 0.0
+
+    distribucion = {nombre: 0 for nombre in categorias_actuales}
+    tiempos = []
+    for f in filas:
+        nombre_cat = nombre_categoria(f["categoria_id"])
+        distribucion[nombre_cat] = distribucion.get(nombre_cat, 0) + 1
+        tiempos.append(f["tiempo_inferencia_ms"])
+    tiempo_prom = round(sum(tiempos) / len(tiempos), 2) if tiempos else 0.0
+
     return MetricasSistema(
         total_documentos_procesados=total,
         documentos_con_alerta=alertas,
         porcentaje_alertas=porcentaje,
         distribucion_por_categoria=distribucion,
         tiempo_promedio_inferencia_ms=tiempo_prom,
-        categorias_disponibles=CATEGORIAS
+        categorias_disponibles=categorias_actuales
     )
 
 
 @app.get("/alertas", response_model=list[AlertaDetalle], tags=["Monitoreo"])
 def obtener_alertas():
     """Devuelve la lista de documentos que requieren revisión manual."""
-    return [AlertaDetalle(id=r["id"], texto_fragmento=r["texto_fragmento"],
-            score_confianza=r["score_confianza"], categoria_asignada=r["categoria"],
-            timestamp=r["timestamp"]) for r in historial if r["alerta_revision_manual"]]
+    conn = obtener_conexion()
+    filas = conn.execute("SELECT * FROM documentos WHERE alerta_revision_manual = 1 ORDER BY id DESC").fetchall()
+    conn.close()
+    return [AlertaDetalle(id=f["id"], texto_fragmento=f["texto_fragmento"],
+            score_confianza=f["score_confianza"], categoria_asignada=nombre_categoria(f["categoria_id"]),
+            timestamp=f["timestamp"]) for f in filas]
 
 
 @app.put("/categorias", tags=["Administración"])
-def obtener_categorias():
-    """Devuelve las categorías de clasificación actualmente configuradas."""
-    return {"categorias": CATEGORIAS, "total": len(CATEGORIAS), "mensaje": "Categorías activas en el sistema"}
+def actualizar_categorias(payload: Optional[CategoriasUpdate] = None):
+    """
+    Sin cuerpo: devuelve las categorías actualmente configuradas.
+    Con cuerpo `{"categorias": [...]}`: renombra las 5 categorías (el número de clases
+    está fijado por la arquitectura del modelo entrenado; no se pueden agregar ni quitar
+    sin reentrenar la CNN).
+    """
+    global categorias_actuales
+    if payload is None:
+        return {"categorias": categorias_actuales, "total": len(categorias_actuales),
+                "mensaje": "Categorías activas en el sistema."}
+
+    if len(payload.categorias) != len(CATEGORIAS):
+        raise HTTPException(status_code=400,
+            detail=f"Se requieren exactamente {len(CATEGORIAS)} nombres (uno por clase del modelo entrenado).")
+
+    nombres = [c.strip() for c in payload.categorias]
+    if any(not c for c in nombres):
+        raise HTTPException(status_code=400, detail="Los nombres de categoría no pueden estar vacíos.")
+
+    categorias_actuales = nombres
+    guardar_categorias(categorias_actuales)
+    return {"categorias": categorias_actuales, "total": len(categorias_actuales),
+            "mensaje": "Categorías actualizadas correctamente."}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -186,26 +326,44 @@ HTML_INTERFAZ = r"""
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistema de Clasificación de Documentos Administrativo-Académicos — UNMSM</title>
     <style>
+        :root {
+            --guinda: #731E19;
+            --guinda-oscuro: #4E1310;
+            --guinda-claro: #A54A3F;
+            --dorado: #B8902E;
+            --dorado-claro: #D9B65C;
+            --crema: #FBF7F2;
+            --gris-fondo: #F4F6F9;
+            --gris-borde: #E0E6ED;
+            --texto: #333;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: linear-gradient(135deg, #1F3864 0%, #2E5B99 100%); min-height: 100vh; padding: 20px; color: #333; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: linear-gradient(135deg, var(--guinda-oscuro) 0%, var(--guinda) 100%); min-height: 100vh; padding: 20px; color: var(--texto); }
         .container { max-width: 1050px; margin: 0 auto; }
-        .header { text-align: center; color: white; padding: 24px 20px 16px; }
-        .header h1 { font-size: 1.7rem; margin-bottom: 8px; font-weight: 700; }
-        .header p { font-size: 0.95rem; opacity: 0.9; }
-        .badge { display: inline-block; background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; margin-top: 10px; }
+        .cinta-dorada { height: 5px; max-width: 1050px; margin: 0 auto; background: linear-gradient(90deg, var(--dorado-claro), var(--dorado), var(--dorado-claro)); border-radius: 4px; }
+        .header { text-align: center; background: var(--crema); border-radius: 16px; padding: 26px 20px 20px; margin: 20px 0; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+        .logo-unmsm { max-width: 320px; width: 80%; height: auto; margin: 0 auto 14px; display: block; }
+        .header h1 { font-size: 1.5rem; margin-bottom: 8px; font-weight: 700; color: var(--guinda); }
+        .header p { font-size: 0.95rem; opacity: 0.85; color: #555; }
+        .badge { display: inline-block; background: var(--guinda); border: 1px solid var(--guinda); padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; margin-top: 10px; color: var(--dorado-claro); }
         .card { background: white; border-radius: 16px; padding: 26px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); margin-bottom: 20px; }
-        .card h2 { font-size: 1.15rem; color: #1F3864; margin-bottom: 16px; }
-        textarea { width: 100%; min-height: 110px; padding: 14px; border: 2px solid #E0E6ED; border-radius: 10px; font-size: 0.95rem; font-family: inherit; resize: vertical; transition: border 0.2s; }
-        textarea:focus { outline: none; border-color: #2E5B99; }
+        .card h2 { font-size: 1.15rem; color: var(--guinda); margin-bottom: 16px; border-left: 4px solid var(--dorado); padding-left: 10px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        textarea { width: 100%; min-height: 110px; padding: 14px; border: 2px solid var(--gris-borde); border-radius: 10px; font-size: 0.95rem; font-family: inherit; resize: vertical; transition: border 0.2s; }
+        textarea:focus { outline: none; border-color: var(--guinda-claro); }
         .ejemplos-grupo { margin: 14px 0; }
         .titulo-grupo { font-size: 0.78rem; color: #888; margin-bottom: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
         .ejemplos { display: flex; flex-wrap: wrap; gap: 8px; }
-        .ejemplo-btn { background: #EBF0F8; border: 1px solid #C9D6E8; color: #1F3864; padding: 6px 12px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; transition: all 0.2s; }
-        .ejemplo-btn:hover { background: #2E5B99; color: white; }
-        .btn-aleatorio { background: #F39C12; border-color: #E67E22; color: white; font-weight: 600; }
-        .btn-aleatorio:hover { background: #E67E22; }
-        .btn-clasificar { width: 100%; background: linear-gradient(135deg, #1F3864, #2E5B99); color: white; border: none; padding: 14px; border-radius: 10px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 14px; transition: transform 0.1s; }
+        .ejemplo-btn { background: #F5E9E7; border: 1px solid #E0C6C2; color: var(--guinda); padding: 6px 12px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; transition: all 0.2s; }
+        .ejemplo-btn:hover { background: var(--guinda); color: white; }
+        .btn-aleatorio { background: var(--dorado); border-color: var(--dorado); color: white; font-weight: 600; }
+        .btn-aleatorio:hover { background: #96731F; }
+        .btn-clasificar { width: 100%; background: linear-gradient(135deg, var(--guinda-oscuro), var(--guinda)); color: white; border: none; padding: 14px; border-radius: 10px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 14px; transition: transform 0.1s; }
         .btn-clasificar:hover { transform: translateY(-2px); }
+        .btn-secundario { background: var(--dorado); color: white; border: none; padding: 10px 18px; border-radius: 8px; font-size: 0.88rem; font-weight: 600; cursor: pointer; margin-top: 12px; }
+        .btn-secundario:hover { background: #96731F; }
+        .btn-exportar { display: inline-block; margin-top: 14px; background: #1B7A72; color: white; padding: 9px 16px; border-radius: 8px; text-decoration: none; font-size: 0.85rem; font-weight: 600; }
+        .btn-exportar:hover { background: #145E58; }
         .resultado { margin-top: 20px; padding: 20px; border-radius: 12px; display: none; animation: fadeIn 0.4s; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; } }
         .resultado.exito { background: #EAF7EC; border: 2px solid #27AE60; }
@@ -216,23 +374,21 @@ HTML_INTERFAZ = r"""
         .resultado.dudoso h3 { color: #935A0A; }
         .resultado.alerta h3 { color: #922B21; }
         .tiempo-info { font-size: 0.82rem; color: #666; margin-bottom: 12px; }
-        .score-bar { background: #E0E6ED; border-radius: 20px; height: 26px; margin: 10px 0; overflow: hidden; }
+        .score-bar { background: var(--gris-borde); border-radius: 20px; height: 26px; margin: 10px 0; overflow: hidden; }
         .score-fill { height: 100%; display: flex; align-items: center; justify-content: flex-end; padding-right: 10px; color: white; font-size: 0.82rem; font-weight: 600; transition: width 0.8s ease; width: 0%; }
         .score-fill.alto { background: linear-gradient(90deg, #27AE60, #2ECC71); }
         .score-fill.medio { background: linear-gradient(90deg, #F39C12, #F1C40F); }
         .score-fill.bajo { background: linear-gradient(90deg, #E74C3C, #EC7063); }
+        .chip { display: inline-block; background: #F5E9E7; color: var(--guinda); padding: 4px 10px; border-radius: 14px; font-size: 0.78rem; margin: 0 6px 6px 0; border: 1px solid #E0C6C2; }
         .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-        .stat-box { background: #F8FAFC; border-radius: 10px; padding: 16px; text-align: center; border: 1px solid #E0E6ED; }
-        .stat-box .num { font-size: 1.7rem; font-weight: 700; color: #1F3864; }
+        .stat-box { background: var(--gris-fondo); border-radius: 10px; padding: 16px; text-align: center; border: 1px solid var(--gris-borde); }
+        .stat-box .num { font-size: 1.7rem; font-weight: 700; color: var(--guinda); }
         .stat-box .label { font-size: 0.78rem; color: #666; margin-top: 4px; }
-        .dist-row { margin-bottom: 12px; }
-        .dist-label { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 4px; color: #444; }
-        .dist-label .cat-nombre { font-weight: 600; }
-        .dist-bar-bg { background: #EDF1F6; border-radius: 8px; height: 20px; overflow: hidden; }
-        .dist-bar-fill { height: 100%; border-radius: 8px; transition: width 0.6s ease; display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; color: white; font-size: 0.72rem; font-weight: 600; min-width: 30px; }
-        .c0 { background: #1F3864; } .c1 { background: #2E5B99; } .c2 { background: #27AE60; } .c3 { background: #8E44AD; } .c4 { background: #E67E22; }
+        .chart-wrap { position: relative; height: 260px; }
+        .cat-input { display: block; width: 100%; margin-bottom: 8px; padding: 9px 12px; border: 1px solid var(--gris-borde); border-radius: 8px; font-size: 0.88rem; font-family: inherit; }
+        .cat-input:focus { outline: none; border-color: var(--guinda-claro); }
         .historial-tabla { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-        .historial-tabla th { text-align: left; padding: 10px 8px; border-bottom: 2px solid #1F3864; color: #1F3864; font-size: 0.78rem; text-transform: uppercase; }
+        .historial-tabla th { text-align: left; padding: 10px 8px; border-bottom: 2px solid var(--guinda); color: var(--guinda); font-size: 0.78rem; text-transform: uppercase; }
         .historial-tabla td { padding: 10px 8px; border-bottom: 1px solid #EDF1F6; }
         .badge-cat { padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; color: white; font-weight: 600; }
         .badge-score { font-weight: 700; }
@@ -241,15 +397,18 @@ HTML_INTERFAZ = r"""
         .links a { color: white; text-decoration: none; margin: 0 10px; font-size: 0.9rem; opacity: 0.9; }
         .links a:hover { text-decoration: underline; }
         .footer { text-align: center; color: white; opacity: 0.8; font-size: 0.85rem; padding: 20px; }
-        .loading { display: none; text-align: center; color: #2E5B99; padding: 10px; }
+        .loading { display: none; text-align: center; color: var(--dorado); padding: 10px; }
+        @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } .stats { grid-template-columns: repeat(2, 1fr); } }
     </style>
 </head>
 <body>
+    <div class="cinta-dorada"></div>
     <div class="container">
         <div class="header">
+            <img class="logo-unmsm" src="/static/logo-unmsm.png" alt="Universidad Nacional Mayor de San Marcos">
             <h1>Sistema de Clasificación Automatizada de Documentos Administrativo-Académicos</h1>
             <p>Red Neuronal Convolucional (CNN) para la Mesa de Partes Virtual — FISI-UNMSM</p>
-            <div class="badge">UNMSM — FISI | Ortiz Herrera</div>
+            <div class="badge">Decana de América · FISI | Ortiz Herrera</div>
         </div>
 
         <div class="card">
@@ -267,6 +426,7 @@ HTML_INTERFAZ = r"""
                 <p style="font-size:0.9rem; color:#555; margin-bottom:6px;">Nivel de confianza:</p>
                 <div class="score-bar"><div class="score-fill" id="scoreFill">0%</div></div>
                 <p id="alertaMsg" style="font-size:0.9rem; margin-top:10px;"></p>
+                <div id="terminosClave"></div>
             </div>
         </div>
 
@@ -280,14 +440,29 @@ HTML_INTERFAZ = r"""
             </div>
         </div>
 
+        <div class="grid-2">
+            <div class="card">
+                <h2>Distribución por Categoría</h2>
+                <div class="chart-wrap"><canvas id="graficoDistribucion"></canvas></div>
+            </div>
+            <div class="card">
+                <h2>Tiempo de Inferencia (últimas clasificaciones)</h2>
+                <div class="chart-wrap"><canvas id="graficoTiempos"></canvas></div>
+            </div>
+        </div>
+
         <div class="card">
-            <h2>Distribución por Categoría</h2>
-            <div id="distribucion"></div>
+            <h2>Configuración de Categorías</h2>
+            <p style="font-size:0.85rem;color:#666;margin-bottom:14px;">El modelo CNN tiene 5 clases fijas por arquitectura; aquí puede renombrarlas sin reentrenar.</p>
+            <div id="categoriasForm"></div>
+            <button class="btn-secundario" onclick="guardarCategorias()">Guardar cambios</button>
+            <p id="categoriasMsg" style="font-size:0.85rem;margin-top:8px;color:#666;"></p>
         </div>
 
         <div class="card">
             <h2>Historial de Clasificaciones</h2>
             <div id="historialContainer"><p class="vacio">Aún no se han clasificado documentos. Pruebe con un ejemplo.</p></div>
+            <a class="btn-exportar" href="/historial/exportar">Exportar historial (CSV)</a>
         </div>
 
         <div class="links">
@@ -302,10 +477,10 @@ HTML_INTERFAZ = r"""
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <script>
         const CATS = ["Certificados de Estudios","Constancias Académicas","Trámites de Convalidación","Trámites de Grados y Títulos","Solicitudes Administrativas Generales"];
-        const COLORS = ["c0","c1","c2","c3","c4"];
-        const BADGE_COLORS = ["#1F3864","#2E5B99","#27AE60","#8E44AD","#E67E22"];
+        const BADGE_COLORS = ["#731E19","#A54A3F","#B8902E","#1B7A72","#2E5B99"];
         const ejemplos = {
             "Certificados de Estudios": [
                 "Solicito la emisión del certificado de estudios correspondiente a los ciclos I al VI de la carrera de Ingeniería de Sistemas, para trámite de homologación en universidad extranjera.",
@@ -333,6 +508,10 @@ HTML_INTERFAZ = r"""
                 "Solicito autorización para reserva de matrícula del ciclo 2026-I por motivos de salud."
             ]
         };
+        let categoriasEdit = [];
+        let chartDistribucion = null;
+        let chartTiempos = null;
+
         function renderEjemplos() {
             const cont = document.getElementById('ejemplosContainer');
             let html = '';
@@ -374,11 +553,73 @@ HTML_INTERFAZ = r"""
                     resultado.className = 'resultado exito'; fill.className = 'score-fill alto';
                     document.getElementById('alertaMsg').textContent = 'Clasificación confiable. Documento categorizado automáticamente.';
                 }
+                const terms = data.terminos_clave || [];
+                document.getElementById('terminosClave').innerHTML = terms.length
+                    ? '<p style="font-size:0.8rem;color:#666;margin:10px 0 6px;">Términos que más influyeron:</p>' + terms.map(t => '<span class="chip">' + t + '</span>').join('')
+                    : '';
                 resultado.style.display = 'block';
                 actualizarTodo();
             } catch (e) {
                 document.getElementById('loading').style.display = 'none';
                 alert('Error al clasificar: ' + e);
+            }
+        }
+        function actualizarGraficoDistribucion(dist, cats) {
+            const data = cats.map(c => dist[c] || 0);
+            if (chartDistribucion) {
+                chartDistribucion.data.labels = cats;
+                chartDistribucion.data.datasets[0].data = data;
+                chartDistribucion.update();
+                return;
+            }
+            chartDistribucion = new Chart(document.getElementById('graficoDistribucion'), {
+                type: 'doughnut',
+                data: { labels: cats, datasets: [{ data: data, backgroundColor: BADGE_COLORS, borderWidth: 2, borderColor: '#fff' }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10.5 } } } } }
+            });
+        }
+        function actualizarGraficoTiempos(hist) {
+            const ultimos = hist.slice(0, 15).slice().reverse();
+            const labels = ultimos.map(r => '#' + r.id);
+            const data = ultimos.map(r => r.tiempo_inferencia_ms);
+            if (chartTiempos) {
+                chartTiempos.data.labels = labels;
+                chartTiempos.data.datasets[0].data = data;
+                chartTiempos.update();
+                return;
+            }
+            chartTiempos = new Chart(document.getElementById('graficoTiempos'), {
+                type: 'line',
+                data: { labels: labels, datasets: [{ label: 'ms', data: data, borderColor: '#B8902E', backgroundColor: 'rgba(184,144,46,0.15)', tension: 0.3, fill: true }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            });
+        }
+        async function cargarCategorias() {
+            const resp = await fetch('/categorias', { method: 'PUT' });
+            const data = await resp.json();
+            categoriasEdit = data.categorias;
+            renderCategoriasForm();
+        }
+        function renderCategoriasForm() {
+            const cont = document.getElementById('categoriasForm');
+            cont.innerHTML = categoriasEdit.map((c, i) =>
+                '<input type="text" class="cat-input" data-idx="' + i + '" value="' + c.replace(/"/g, '&quot;') + '">'
+            ).join('');
+        }
+        async function guardarCategorias() {
+            const inputs = document.querySelectorAll('.cat-input');
+            const nuevas = Array.from(inputs).map(i => i.value.trim());
+            const msg = document.getElementById('categoriasMsg');
+            if (nuevas.some(n => !n)) { msg.textContent = 'Ningún nombre puede quedar vacío.'; return; }
+            const resp = await fetch('/categorias', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ categorias: nuevas }) });
+            const data = await resp.json();
+            if (resp.ok) {
+                msg.textContent = data.mensaje;
+                categoriasEdit = data.categorias;
+                CATS.length = 0; CATS.push.apply(CATS, data.categorias);
+                actualizarTodo();
+            } else {
+                msg.textContent = data.detail || 'Error al actualizar categorías.';
             }
         }
         async function actualizarTodo() {
@@ -389,17 +630,11 @@ HTML_INTERFAZ = r"""
                 document.getElementById('totalAlertas').textContent = data.documentos_con_alerta;
                 document.getElementById('tiempoProm').textContent = data.tiempo_promedio_inferencia_ms;
                 document.getElementById('numCategorias').textContent = data.categorias_disponibles.length;
-                const total = data.total_documentos_procesados;
-                const dist = data.distribucion_por_categoria;
-                let distHtml = '';
-                CATS.forEach((cat, i) => {
-                    const count = dist[cat] || 0;
-                    const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-                    distHtml += '<div class="dist-row"><div class="dist-label"><span class="cat-nombre">' + cat + '</span><span>' + count + ' doc(s) — ' + pct + '%</span></div><div class="dist-bar-bg"><div class="dist-bar-fill ' + COLORS[i] + '" style="width:' + pct + '%">' + (pct > 8 ? pct + '%' : '') + '</div></div></div>';
-                });
-                document.getElementById('distribucion').innerHTML = distHtml;
+                actualizarGraficoDistribucion(data.distribucion_por_categoria, data.categorias_disponibles);
                 const hResp = await fetch('/historial');
-                actualizarHistorial(await hResp.json());
+                const hist = await hResp.json();
+                actualizarHistorial(hist);
+                actualizarGraficoTiempos(hist);
             } catch (e) {}
         }
         function actualizarHistorial(hist) {
@@ -418,6 +653,7 @@ HTML_INTERFAZ = r"""
             cont.innerHTML = html;
         }
         renderEjemplos();
+        cargarCategorias();
         actualizarTodo();
     </script>
 </body>
