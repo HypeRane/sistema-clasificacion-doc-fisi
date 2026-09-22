@@ -1,6 +1,6 @@
-# Sistema de Clasificación Automatizada de Documentos Clínicos
+# Sistema de Clasificación Automatizada de Documentos Administrativo-Académicos
 
-Sistema basado en **Redes Neuronales Convolucionales (CNN)** para la clasificación automatizada de documentos clínicos en español, orientado a los archivos hospitalarios de Lima, Perú.
+Sistema basado en **Redes Neuronales Convolucionales (CNN)** para la clasificación automatizada de documentos administrativo-académicos en español, orientado a la Mesa de Partes Virtual (Formato Único de Trámite — FUT) de la FISI-UNMSM.
 
 **Universidad Nacional Mayor de San Marcos — Facultad de Ingeniería de Sistemas e Informática**
 Tesis de pregrado | Autor: Fabrizio Peter Ortiz Herrera
@@ -9,13 +9,13 @@ Tesis de pregrado | Autor: Fabrizio Peter Ortiz Herrera
 
 ## Descripción
 
-Este sistema utiliza una arquitectura CNN entrenada sobre texto clínico en español para clasificar automáticamente documentos hospitalarios en cinco categorías:
+Este sistema utiliza una arquitectura CNN entrenada sobre texto de solicitudes FUT en español para clasificar automáticamente documentos administrativo-académicos en cinco categorías:
 
-- Nota de alta médica
-- Registro de admisión
-- Informe de laboratorio
-- Nota de evolución clínica
-- Informe de imagen diagnóstica
+- Certificados de Estudios
+- Constancias Académicas
+- Trámites de Convalidación
+- Trámites de Grados y Títulos
+- Solicitudes Administrativas Generales
 
 El sistema expone sus funcionalidades mediante una **API REST desarrollada con FastAPI**, con documentación interactiva automática (Swagger UI) y una interfaz web para la clasificación de documentos.
 
@@ -38,8 +38,8 @@ El sistema expone sus funcionalidades mediante una **API REST desarrollada con F
 ### 1. Clonar el repositorio
 
 ```bash
-git clone https://github.com/TU_USUARIO/sistema-clasificacion-clinica.git
-cd sistema-clasificacion-clinica
+git clone https://github.com/HypeRane/sistema-clasificacion-documentos-fisi.git
+cd sistema-clasificacion-documentos-fisi
 ```
 
 ### 2. Crear entorno virtual
@@ -73,7 +73,7 @@ El sistema entrenará automáticamente el modelo CNN en el primer arranque y que
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| `POST` | `/clasificar` | Clasifica un documento clínico |
+| `POST` | `/clasificar` | Clasifica un documento administrativo-académico |
 | `GET` | `/historial` | Historial de documentos procesados |
 | `GET` | `/metricas` | Métricas de rendimiento del sistema |
 | `GET` | `/alertas` | Documentos que requieren revisión manual |

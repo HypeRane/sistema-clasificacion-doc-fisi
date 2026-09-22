@@ -1,6 +1,6 @@
 """
 main.py
-API REST del Sistema de Clasificación Automatizada de Documentos Clínicos.
+API REST del Sistema de Clasificación Automatizada de Documentos Administrativo-Académicos.
 Universidad Nacional Mayor de San Marcos — FISI
 Autor: Ortiz Herrera, Fabrizio Peter
 """
@@ -15,19 +15,19 @@ import uvicorn
 import time
 
 app = FastAPI(
-    title="Sistema de Clasificación Automatizada de Documentos Clínicos",
+    title="Sistema de Clasificación Automatizada de Documentos Administrativo-Académicos",
     description="""
-## Sistema CNN para Archivos Hospitalarios de Lima
+## Sistema CNN para la Mesa de Partes Virtual — FISI-UNMSM
 
 Este sistema utiliza una **Red Neuronal Convolucional (CNN)** entrenada sobre
-documentos clínicos en español para clasificar automáticamente expedientes
-hospitalarios en cinco categorías:
+solicitudes del Formato Único de Trámite (FUT) en español para clasificar
+automáticamente documentos administrativo-académicos en cinco categorías:
 
-- Nota de alta médica
-- Registro de admisión
-- Informe de laboratorio
-- Nota de evolución clínica
-- Informe de imagen diagnóstica
+- Certificados de Estudios
+- Constancias Académicas
+- Trámites de Convalidación
+- Trámites de Grados y Títulos
+- Solicitudes Administrativas Generales
 
 **Universidad Nacional Mayor de San Marcos — FISI | Tesis de pregrado 2025**
     """,
@@ -45,8 +45,8 @@ tiempos_inferencia = []
 
 class DocumentoEntrada(BaseModel):
     texto: str = Field(..., min_length=10,
-        description="Texto del documento clínico a clasificar",
-        json_schema_extra={"example": "Paciente dado de alta en buen estado general. Diagnóstico: hipertensión arterial controlada."})
+        description="Texto de la solicitud o documento administrativo-académico a clasificar",
+        json_schema_extra={"example": "Solicito constancia de matrícula del ciclo 2026-I para trámite de beca externa."})
 
 class ResultadoClasificacion(BaseModel):
     categoria: str
@@ -88,16 +88,16 @@ def interfaz_web():
 @app.get("/estado", tags=["Sistema"])
 def estado():
     """Verifica que el sistema está activo."""
-    return {"sistema": "Clasificación Automatizada de Documentos Clínicos",
+    return {"sistema": "Clasificación Automatizada de Documentos Administrativo-Académicos",
             "estado": "activo", "version": "1.1.0", "documentacion": "/docs"}
 
 
 @app.post("/clasificar", response_model=ResultadoClasificacion, tags=["Clasificación"])
 def clasificar_documento(documento: DocumentoEntrada):
     """
-    Clasifica un documento clínico en una de las cinco categorías definidas.
+    Clasifica un documento administrativo-académico en una de las cinco categorías definidas.
 
-    - Recibe el **texto** del documento clínico
+    - Recibe el **texto** de la solicitud o documento
     - Devuelve la **categoría asignada**, el **score de confianza** (0-1)
     - Incluye el **tiempo de inferencia** en milisegundos
     - Si el score es menor a 0.60, genera una **alerta de revisión manual**
@@ -184,7 +184,7 @@ HTML_INTERFAZ = r"""
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema de Clasificación de Documentos Clínicos — UNMSM</title>
+    <title>Sistema de Clasificación de Documentos Administrativo-Académicos — UNMSM</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, sans-serif; background: linear-gradient(135deg, #1F3864 0%, #2E5B99 100%); min-height: 100vh; padding: 20px; color: #333; }
@@ -247,14 +247,14 @@ HTML_INTERFAZ = r"""
 <body>
     <div class="container">
         <div class="header">
-            <h1>Sistema de Clasificación Automatizada de Documentos Clínicos</h1>
-            <p>Red Neuronal Convolucional (CNN) para Archivos Hospitalarios de Lima</p>
+            <h1>Sistema de Clasificación Automatizada de Documentos Administrativo-Académicos</h1>
+            <p>Red Neuronal Convolucional (CNN) para la Mesa de Partes Virtual — FISI-UNMSM</p>
             <div class="badge">UNMSM — FISI | Ortiz Herrera</div>
         </div>
 
         <div class="card">
-            <h2>Clasificar Documento Clínico</h2>
-            <textarea id="texto" placeholder="Escriba o pegue aquí el texto del documento clínico a clasificar..."></textarea>
+            <h2>Clasificar Documento (FUT)</h2>
+            <textarea id="texto" placeholder="Escriba o pegue aquí el texto de la solicitud o documento administrativo-académico a clasificar..."></textarea>
             <div class="ejemplos-grupo">
                 <div class="titulo-grupo">Ejemplos por categoría (haga clic para cargar)</div>
                 <div class="ejemplos" id="ejemplosContainer"></div>
@@ -298,39 +298,39 @@ HTML_INTERFAZ = r"""
 
         <div class="footer">
             Universidad Nacional Mayor de San Marcos — Facultad de Ingeniería de Sistemas e Informática<br>
-            Tesis de pregrado 2025 | Clasificación de documentos clínicos mediante CNN
+            Tesis de pregrado 2025 | Clasificación de documentos administrativo-académicos mediante CNN
         </div>
     </div>
 
     <script>
-        const CATS = ["Nota de alta médica","Registro de admisión","Informe de laboratorio","Nota de evolución clínica","Informe de imagen diagnóstica"];
+        const CATS = ["Certificados de Estudios","Constancias Académicas","Trámites de Convalidación","Trámites de Grados y Títulos","Solicitudes Administrativas Generales"];
         const COLORS = ["c0","c1","c2","c3","c4"];
         const BADGE_COLORS = ["#1F3864","#2E5B99","#27AE60","#8E44AD","#E67E22"];
         const ejemplos = {
-            "Alta médica": [
-                "Paciente dado de alta en buen estado general. Diagnóstico: hipertensión arterial controlada. Medicación: enalapril 10mg. Control ambulatorio en 7 días.",
-                "Alta hospitalaria. Paciente con neumonía resuelta. Antibioticoterapia completada. Se indica reposo relativo por 5 días.",
-                "Egreso médico programado. Paciente refiere mejoría significativa. Sin fiebre en las últimas 48 horas. Alta con indicaciones."
+            "Certificados de Estudios": [
+                "Solicito la emisión del certificado de estudios correspondiente a los ciclos I al VI de la carrera de Ingeniería de Sistemas, para trámite de homologación en universidad extranjera.",
+                "Solicito certificado de estudios oficial con sello de la facultad para presentar en proceso de admisión a maestría.",
+                "Requiero copia certificada de mi certificado de estudios, ya que el documento original fue extraviado."
             ],
-            "Laboratorio": [
-                "Hemograma completo: Hb 11.2 g/dL, leucocitos 8500/mm3, plaquetas 220000/mm3. Resultado dentro de rangos normales.",
-                "Glucosa en ayunas: 126 mg/dL. Colesterol total: 210 mg/dL. Triglicéridos: 185 mg/dL. Perfil lipídico alterado.",
-                "Cultivo de orina: positivo para Escherichia coli. Sensible a ciprofloxacino y nitrofurantoína."
+            "Constancias Académicas": [
+                "Solicito constancia de matrícula del ciclo 2026-I para trámite de beca externa.",
+                "Solicito constancia de notas del ciclo 2025-II para presentar ante mi centro de trabajo.",
+                "Pido constancia de orden de mérito correspondiente al décimo ciclo de la carrera de Ingeniería de Sistemas."
             ],
-            "Admisión": [
-                "Paciente ingresa por emergencia con cuadro de dolor abdominal agudo de 6 horas de evolución. Sin antecedentes quirúrgicos.",
-                "Admisión hospitalaria: varón de 45 años, sin antecedentes relevantes, refiere disnea de esfuerzo progresiva.",
-                "Ingreso por guardia. Paciente femenino, 32 años, con fiebre de 39°C y cefalea intensa de 2 días."
+            "Trámites de Convalidación": [
+                "Solicito la convalidación del curso de Cálculo I llevado en la Universidad Nacional de Ingeniería, cursado en el ciclo 2023-I.",
+                "Solicito convalidación de cursos aprobados en programa de intercambio en la Universidad de Chile.",
+                "Pido evaluación y convalidación de la asignatura de Física General II proveniente de traslado externo."
             ],
-            "Imagen": [
-                "Radiografía de tórax: cardiomegalia leve. Sin derrame pleural. Infiltrado basal derecho compatible con proceso neumónico.",
-                "Ecografía abdominal: hígado de tamaño normal, vesícula biliar con cálculo único de 12mm. Vía biliar no dilatada.",
-                "Tomografía computarizada de cráneo: sin evidencia de hemorragia intracraneal. Estructuras de línea media centradas."
+            "Trámites de Grados y Títulos": [
+                "Solicito la inscripción de mi expediente para optar el título profesional de Ingeniero de Sistemas.",
+                "Pido programación de fecha de sustentación de tesis para la obtención del título profesional.",
+                "Solicito el grado académico de Bachiller en Ingeniería de Sistemas, habiendo cumplido con los requisitos establecidos."
             ],
-            "Evolución": [
-                "Evolución día 2: paciente refiere mejoría del dolor. Afebril. Herida quirúrgica limpia sin signos de infección.",
-                "Seguimiento post-quirúrgico: herida limpia, sin secreciones. Paciente deambula sin dificultad. Tolera dieta.",
-                "Control diario: presión arterial 130/85 mmHg, frecuencia cardíaca 78 lpm, saturación O2 97%. Estable."
+            "Solicitudes Administrativas Generales": [
+                "Solicito la rectificación de mis datos personales en el sistema académico debido a un error en el número de documento de identidad.",
+                "Pido la emisión de un duplicado de carné universitario por pérdida del documento original.",
+                "Solicito autorización para reserva de matrícula del ciclo 2026-I por motivos de salud."
             ]
         };
         function renderEjemplos() {

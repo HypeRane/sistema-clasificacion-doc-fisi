@@ -1,6 +1,6 @@
 """
 modelo.py
-Arquitectura CNN para clasificación de documentos clínicos.
+Arquitectura CNN para clasificación de documentos administrativo-académicos.
 """
 
 import torch
@@ -12,13 +12,13 @@ import os
 
 # Umbral de confianza: scores < 0.60 indican clasificación incierta y activan revisión manual.
 # Basado en Lu et al. (2022): F1-Score como métrica principal ante desbalanceo de clases.
-# Categorías de documentos clínicos
+# Categorías de documentos administrativo-académicos (Mesa de Partes Virtual — FUT, FISI-UNMSM)
 CATEGORIAS = [
-    "Nota de alta médica",
-    "Registro de admisión",
-    "Informe de laboratorio",
-    "Nota de evolución clínica",
-    "Informe de imagen diagnóstica"
+    "Certificados de Estudios",
+    "Constancias Académicas",
+    "Trámites de Convalidación",
+    "Trámites de Grados y Títulos",
+    "Solicitudes Administrativas Generales"
 ]
 
 # ── Arquitectura CNN ───────────────────────────────────────────────────────────
@@ -46,50 +46,55 @@ class CNN_Clasificador(nn.Module):
 
 # ── Datos de entrenamiento de prueba ──────────────────────────────────────────
 DATOS_ENTRENAMIENTO = [
-    # Notas de alta médica (clase 0)
-    ("Paciente dado de alta en buen estado general. Diagnóstico: hipertensión arterial controlada. Medicación: enalapril 10mg.", 0),
-    ("Alta médica voluntaria. Paciente estable, afebril. Se indica control ambulatorio en 7 días.", 0),
-    ("Se procede al alta del paciente tras 3 días de hospitalización. Evolución favorable.", 0),
-    ("Alta hospitalaria. Paciente con diagnóstico de neumonía resuelta. Antibioticoterapia completada.", 0),
-    ("Nota de alta: paciente adulto mayor, 72 años, egresa con diagnóstico de insuficiencia cardíaca compensada.", 0),
-    ("Egreso médico programado. Paciente refiere mejoría significativa. Sin fiebre en las últimas 48 horas.", 0),
-    ("Alta médica. Fractura de radio distal tratada quirúrgicamente. Indicaciones postoperatorias adjuntas.", 0),
+    # Certificados de Estudios (clase 0)
+    ("Solicito la emisión del certificado de estudios correspondiente a los ciclos I al VI de la carrera de Ingeniería de Sistemas, para trámite de homologación en universidad extranjera.", 0),
+    ("Mediante la presente solicito se expida mi certificado de estudios completo, incluyendo todos los cursos aprobados desde el ingreso hasta el ciclo 2025-II.", 0),
+    ("Solicito certificado de estudios oficial con sello de la facultad para presentar en proceso de admisión a maestría.", 0),
+    ("Requiero el certificado de estudios de los últimos cuatro semestres académicos, necesario para postulación a intercambio estudiantil.", 0),
+    ("Solicito la expedición de mi certificado de estudios generales, con el detalle de créditos y promedio ponderado por ciclo.", 0),
+    ("Pido se me otorgue el certificado de estudios de la Escuela Profesional de Ingeniería de Sistemas para fines de trabajo en el extranjero.", 0),
+    ("Solicito certificado de estudios con firma y sello de Decanato para trámite de visa de estudios.", 0),
+    ("Requiero copia certificada de mi certificado de estudios, ya que el documento original fue extraviado.", 0),
 
-    # Registros de admisión (clase 1)
-    ("Paciente ingresa por emergencia con cuadro de dolor abdominal agudo de 6 horas de evolución.", 1),
-    ("Admisión hospitalaria: varón de 45 años, sin antecedentes relevantes, refiere disnea de esfuerzo.", 1),
-    ("Ingreso por guardia. Paciente femenino, 32 años, con fiebre de 39°C y cefalea intensa.", 1),
-    ("Registro de admisión: paciente con antecedente de diabetes mellitus tipo 2, ingresa por descompensación glucémica.", 1),
-    ("Admisión de urgencia. Traumatismo craneoencefálico leve. Glasgow 14/15 al ingreso.", 1),
-    ("Paciente admitido para cirugía programada de colecistectomía laparoscópica.", 1),
-    ("Ingreso electivo. Paciente con diagnóstico previo de cáncer gástrico para quimioterapia.", 1),
+    # Constancias Académicas (clase 1)
+    ("Solicito constancia de matrícula del ciclo 2026-I para trámite de beca externa.", 1),
+    ("Solicito constancia de notas del ciclo 2025-II para presentar ante mi centro de trabajo.", 1),
+    ("Pido constancia de orden de mérito correspondiente al décimo ciclo de la carrera de Ingeniería de Sistemas.", 1),
+    ("Solicito constancia de egresado, requerida para inscripción en el proceso de titulación.", 1),
+    ("Solicito constancia de ingreso a la universidad, necesaria para trámite de visa estudiantil.", 1),
+    ("Requiero constancia de tercio superior para postulación a beca de posgrado.", 1),
+    ("Solicito constancia de no adeudo académico para completar mi expediente de graduación.", 1),
+    ("Pido constancia de matrícula vigente para trámite de descuento en transporte universitario.", 1),
 
-    # Informes de laboratorio (clase 2)
-    ("Hemograma completo: Hb 11.2 g/dL, leucocitos 8500/mm3, plaquetas 220000/mm3. Resultado dentro de rangos normales.", 2),
-    ("Glucosa en ayunas: 126 mg/dL. Colesterol total: 210 mg/dL. Triglicéridos: 185 mg/dL.", 2),
-    ("Cultivo de orina: positivo para Escherichia coli. Sensible a ciprofloxacino y nitrofurantoína.", 2),
-    ("Resultado de prueba PCR COVID-19: NEGATIVO. Muestra: hisopado nasofaríngeo.", 2),
-    ("Perfil hepático: TGO 45 U/L, TGP 52 U/L, bilirrubina total 1.1 mg/dL. Fosfatasa alcalina 98 U/L.", 2),
-    ("Examen de orina completo: densidad 1.020, pH 6.0, proteínas negativas, glucosa negativa.", 2),
-    ("Proteína C reactiva: 85 mg/L. Velocidad de sedimentación globular: 48 mm/h.", 2),
+    # Trámites de Convalidación (clase 2)
+    ("Solicito la convalidación del curso de Cálculo I llevado en la Universidad Nacional de Ingeniería, cursado en el ciclo 2023-I.", 2),
+    ("Solicito convalidación de cursos aprobados en programa de intercambio en la Universidad de Chile.", 2),
+    ("Pido evaluación y convalidación de la asignatura de Física General II proveniente de traslado externo.", 2),
+    ("Solicito convalidación de estudios realizados en instituto superior tecnológico para continuar la carrera de Ingeniería de Sistemas.", 2),
+    ("Requiero convalidación de cursos electivos cursados en universidad extranjera bajo convenio de movilidad estudiantil.", 2),
+    ("Solicito la convalidación de la asignatura de Estadística I, curso aprobado en la modalidad de traslado interno.", 2),
+    ("Pido revisión y convalidación de sílabos para el curso de Programación I proveniente de otra casa de estudios.", 2),
+    ("Solicito convalidación de créditos obtenidos en el ciclo de nivelación de la Facultad de Ciencias Físicas.", 2),
 
-    # Notas de evolución (clase 3)
-    ("Evolución: paciente refiere mejoría del dolor. Afebril. Herida quirúrgica sin signos de infección.", 3),
-    ("Nota de evolución día 2: paciente tolera dieta blanda, sin náuseas ni vómitos. Funciones vitales estables.", 3),
-    ("Seguimiento post-quirúrgico: herida limpia, sin secreciones. Paciente deambula sin dificultad.", 3),
-    ("Nota de visita: paciente con dificultad respiratoria leve. Se ajusta oxigenoterapia a 3 litros por minuto.", 3),
-    ("Evolución clínica favorable. Fiebre cedió con paracetamol. Cultivos pendientes.", 3),
-    ("Control diario: presión arterial 130/85 mmHg, frecuencia cardíaca 78 lpm, saturación O2 97%.", 3),
-    ("Nota de evolución: paciente consciente, orientado en tiempo y espacio. Sin déficit neurológico focal.", 3),
+    # Trámites de Grados y Títulos (clase 3)
+    ("Solicito la inscripción de mi expediente para optar el título profesional de Ingeniero de Sistemas.", 3),
+    ("Pido programación de fecha de sustentación de tesis para la obtención del título profesional.", 3),
+    ("Solicito el grado académico de Bachiller en Ingeniería de Sistemas, habiendo cumplido con los requisitos establecidos.", 3),
+    ("Requiero la emisión del diploma de título profesional, trámite ya aprobado por el Consejo de Facultad.", 3),
+    ("Solicito duplicado de diploma de bachiller por motivo de deterioro del documento original.", 3),
+    ("Pido la revisión de mi expediente de titulación por la modalidad de tesis para su aprobación final.", 3),
+    ("Solicito constancia de trámite en proceso de obtención del título profesional para fines laborales.", 3),
+    ("Requiero la actualización de mi expediente de grado académico de bachiller con documentos complementarios.", 3),
 
-    # Informes de imagen (clase 4)
-    ("Radiografía de tórax: cardiomegalia leve. Sin derrame pleural. Infiltrado basal derecho compatible con neumonía.", 4),
-    ("Ecografía abdominal: hígado de tamaño normal, vesícula biliar con cálculo único de 12mm.", 4),
-    ("Tomografía computarizada de cráneo: sin evidencia de hemorragia intracraneal. Estructuras de línea media centradas.", 4),
-    ("Resonancia magnética de columna lumbar: hernia discal L4-L5 con compresión radicular leve.", 4),
-    ("Ecografía obstétrica: embarazo de 20 semanas, producto único, frecuencia cardíaca fetal 148 lpm.", 4),
-    ("Mamografía bilateral: BIRADS 2. Sin hallazgos sospechosos de malignidad.", 4),
-    ("Tomografía de abdomen con contraste: no se evidencian masas ni colecciones. Riñones de morfología normal.", 4),
+    # Solicitudes Administrativas Generales (clase 4)
+    ("Solicito la rectificación de mis datos personales en el sistema académico debido a un error en el número de documento de identidad.", 4),
+    ("Pido la emisión de un duplicado de carné universitario por pérdida del documento original.", 4),
+    ("Solicito autorización para reserva de matrícula del ciclo 2026-I por motivos de salud.", 4),
+    ("Requiero copia certificada de mi expediente estudiantil para trámite ante entidad externa.", 4),
+    ("Solicito cambio de escuela profesional dentro de la misma facultad.", 4),
+    ("Pido la devolución de tasa educativa pagada en exceso durante el proceso de matrícula.", 4),
+    ("Solicito la actualización de mi correo electrónico institucional en el sistema de la universidad.", 4),
+    ("Requiero autorización de retiro de curso fuera del plazo establecido por motivos justificados.", 4),
 ]
 
 
