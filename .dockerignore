@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+tests/
+.pytest_cache/
+Avance 3 1609/
+README.md
+requirements-dev.txt
+historial.db
+categorias.json
+modelo_cnn.pt
+vectorizer.pkl

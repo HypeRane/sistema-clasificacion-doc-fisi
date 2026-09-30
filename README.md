@@ -25,13 +25,15 @@ El sistema expone sus funcionalidades mediante una **API REST desarrollada con F
 
 | Componente | Tecnología |
 |---|---|
-| Lenguaje | Python 3.11+ |
+| Lenguaje | Python 3.13 |
 | Modelo CNN | PyTorch |
 | API REST | FastAPI + Uvicorn |
 | Vectorización | scikit-learn (TF-IDF) |
 | Persistencia | SQLite |
 | Visualización | Chart.js |
 | Documentación | Swagger UI (OpenAPI) |
+| Contenerización | Docker + Docker Compose |
+| Pruebas | pytest |
 
 ---
 
@@ -68,6 +70,27 @@ El sistema entrenará automáticamente el modelo CNN en el primer arranque y que
 
 - **Interfaz web:** http://localhost:8000
 - **Documentación API (Swagger):** http://localhost:8000/docs
+
+---
+
+## Ejecución con Docker
+
+```bash
+docker compose up --build
+```
+
+El servicio queda disponible en `http://localhost:8000`. Por defecto no se declara un volumen: el modelo se reentrena en segundos en cada arranque del contenedor (mismo comportamiento que en local cuando no existen `modelo_cnn.pt`/`vectorizer.pkl`). Para conservar el historial y el modelo entre recreaciones del contenedor, descomentar el volumen indicado en `docker-compose.yml`.
+
+---
+
+## Pruebas
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -v
+```
+
+Incluye pruebas de la arquitectura CNN y la lógica de inferencia (`tests/test_modelo.py`) y pruebas de integración de todos los endpoints de la API (`tests/test_main.py`).
 
 ---
 

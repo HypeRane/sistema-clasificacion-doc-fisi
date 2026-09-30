@@ -1,0 +1,15 @@
+services:
+  clasificador:
+    build: .
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    # Por defecto no se declara volumen: el modelo se reentrena en segundos si
+    # no encuentra modelo_cnn.pt/vectorizer.pkl (mismo comportamiento que en
+    # local). Para conservar el historial y el modelo entre recreaciones del
+    # contenedor, descomentar:
+    # volumes:
+    #   - datos_app:/app
+
+# volumes:
+#   datos_app:
