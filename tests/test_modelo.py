@@ -2,7 +2,12 @@
 import torch
 import pytest
 
-from modelo import CATEGORIAS, DATOS_ENTRENAMIENTO, CNN_Clasificador, entrenar_modelo, clasificar
+from modelo import CATEGORIAS, cargar_datos_entrenamiento, CNN_Clasificador, entrenar_modelo, clasificar
+
+
+@pytest.fixture(scope="module")
+def datos_entrenamiento():
+    return cargar_datos_entrenamiento()
 
 
 @pytest.fixture(scope="module")
@@ -15,8 +20,8 @@ def test_categorias_son_cinco():
     assert len(set(CATEGORIAS)) == 5  # sin duplicados
 
 
-def test_datos_entrenamiento_cubren_las_cinco_clases():
-    etiquetas = {etiqueta for _, etiqueta in DATOS_ENTRENAMIENTO}
+def test_datos_entrenamiento_cubren_las_cinco_clases(datos_entrenamiento):
+    etiquetas = {etiqueta for _, etiqueta in datos_entrenamiento}
     assert etiquetas == set(range(5))
 
 
@@ -44,12 +49,13 @@ def test_clasificar_devuelve_la_estructura_esperada(modelo_entrenado):
     assert resultado["alerta_revision_manual"] == (resultado["score_confianza"] < 0.60)
 
 
-def test_clasificar_reconoce_la_mayoria_de_sus_propios_ejemplos(modelo_entrenado):
+def test_clasificar_reconoce_la_mayoria_de_sus_propios_ejemplos(modelo_entrenado, datos_entrenamiento):
     modelo, vectorizer = modelo_entrenado
     aciertos = sum(
-        1 for texto, etiqueta in DATOS_ENTRENAMIENTO
+        1 for texto, etiqueta in datos_entrenamiento
         if clasificar(texto, modelo, vectorizer)["categoria_id"] == etiqueta
     )
-    # Con ~8 ejemplos por clase el modelo deberia sobre-ajustar y reconocer
-    # la gran mayoria de sus propios textos de entrenamiento.
-    assert aciertos / len(DATOS_ENTRENAMIENTO) >= 0.8
+    # Con un corpus real y desbalanceado el modelo no necesariamente sobre-ajusta
+    # tan limpio como con los ejemplos sintéticos anteriores; se exige una mayoría
+    # clara en vez de un acierto casi perfecto.
+    assert aciertos / len(datos_entrenamiento) >= 0.6

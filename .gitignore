@@ -4,9 +4,15 @@ env/
 __pycache__/
 *.pyc
 
-# Modelo entrenado (se regenera automáticamente)
-modelo_cnn.pt
-vectorizer.pkl
+# Dataset crudo de entrenamiento (Resoluciones Decanales): contiene nombres
+# reales de estudiantes y docentes. Son documentos públicos del portal de
+# transparencia FISI, pero no se redistribuyen en bloque desde este repo.
+# El modelo YA ENTRENADO (modelo_cnn.pt/vectorizer.pkl) sí se versiona, para
+# que el sistema funcione de inmediato en cualquier clon sin necesitar el
+# dataset crudo.
+dataset/resoluciones_decanales/raw/
+dataset/resoluciones_decanales/dataset.json
+dataset/resoluciones_decanales/_muestra*.txt
 
 # Estado en tiempo de ejecución (se regenera automáticamente)
 historial.db

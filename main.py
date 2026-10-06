@@ -21,19 +21,22 @@ import io
 import sqlite3
 
 app = FastAPI(
-    title="Sistema de Clasificación Automatizada de Documentos Administrativo-Académicos",
+    title="Sistema de Clasificación Automatizada de Resoluciones Decanales",
     description="""
-## Sistema CNN para la Mesa de Partes Virtual — FISI-UNMSM
+## Sistema CNN para Resoluciones Decanales — FISI-UNMSM
 
 Este sistema utiliza una **Red Neuronal Convolucional (CNN)** entrenada sobre
-solicitudes del Formato Único de Trámite (FUT) en español para clasificar
-automáticamente documentos administrativo-académicos en cinco categorías:
+Resoluciones Decanales reales de la FISI-UNMSM (portal de transparencia) para
+clasificar automáticamente documentos administrativos en cinco categorías:
 
-- Certificados de Estudios
-- Constancias Académicas
-- Trámites de Convalidación
-- Trámites de Grados y Títulos
-- Solicitudes Administrativas Generales
+- Grados Académicos y Títulos Profesionales
+- Gestión Académica, Económica y Normativa General
+- Trámites de Matrícula
+- Rectificación y Protección de Datos Personales
+- Gestión de Personal Docente y Administrativo
+
+Piloto de validación de concepto mientras Registros Académicos completa la
+digitalización de los documentos del FUT (ver Capítulo IV de la tesis).
 
 **Universidad Nacional Mayor de San Marcos — FISI | Tesis de pregrado 2025**
     """,
@@ -103,8 +106,8 @@ inicializar_db()
 
 class DocumentoEntrada(BaseModel):
     texto: str = Field(..., min_length=10,
-        description="Texto de la solicitud o documento administrativo-académico a clasificar",
-        json_schema_extra={"example": "Solicito constancia de matrícula del ciclo 2026-I para trámite de beca externa."})
+        description="Texto de la Resolución Decanal u otro documento administrativo a clasificar",
+        json_schema_extra={"example": "Otorgar el Grado Académico de Bachiller en Ingeniería de Sistemas al egresado, con código de matrícula N.º 04200015."})
 
 class ResultadoClasificacion(BaseModel):
     categoria: str
@@ -152,16 +155,16 @@ def interfaz_web():
 @app.get("/estado", tags=["Sistema"])
 def estado():
     """Verifica que el sistema está activo."""
-    return {"sistema": "Clasificación Automatizada de Documentos Administrativo-Académicos",
+    return {"sistema": "Clasificación Automatizada de Resoluciones Decanales",
             "estado": "activo", "version": "1.2.0", "documentacion": "/docs"}
 
 
 @app.post("/clasificar", response_model=ResultadoClasificacion, tags=["Clasificación"])
 def clasificar_documento(documento: DocumentoEntrada):
     """
-    Clasifica un documento administrativo-académico en una de las cinco categorías definidas.
+    Clasifica una Resolución Decanal (u otro documento administrativo) en una de las cinco categorías definidas.
 
-    - Recibe el **texto** de la solicitud o documento
+    - Recibe el **texto** de la resolución o documento
     - Devuelve la **categoría asignada**, el **score de confianza** (0-1) y los **términos clave**
       (TF-IDF) que más influyeron en la predicción
     - Incluye el **tiempo de inferencia** en milisegundos
@@ -421,14 +424,14 @@ HTML_INTERFAZ = r"""
     <div class="container">
         <div class="header">
             <img class="logo-unmsm" src="/static/logo-unmsm.png" alt="Universidad Nacional Mayor de San Marcos">
-            <h1>Sistema de Clasificación Automatizada de Documentos Administrativo-Académicos</h1>
-            <p>Red Neuronal Convolucional (CNN) para la Mesa de Partes Virtual — FISI-UNMSM</p>
+            <h1>Sistema de Clasificación Automatizada de Resoluciones Decanales</h1>
+            <p>Red Neuronal Convolucional (CNN) — Portal de Transparencia FISI-UNMSM</p>
             <div class="badge">Decana de América · FISI | Ortiz Herrera</div>
         </div>
 
         <div class="card">
-            <h2>Clasificar Documento (FUT)</h2>
-            <textarea id="texto" placeholder="Escriba o pegue aquí el texto de la solicitud o documento administrativo-académico a clasificar..."></textarea>
+            <h2>Clasificar Resolución Decanal</h2>
+            <textarea id="texto" placeholder="Escriba o pegue aquí el texto de la Resolución Decanal a clasificar..."></textarea>
             <div class="ejemplos-grupo">
                 <div class="titulo-grupo">Ejemplos por categoría (haga clic para cargar)</div>
                 <div class="ejemplos" id="ejemplosContainer"></div>
@@ -488,39 +491,29 @@ HTML_INTERFAZ = r"""
 
         <div class="footer">
             Universidad Nacional Mayor de San Marcos — Facultad de Ingeniería de Sistemas e Informática<br>
-            Tesis de pregrado 2025 | Clasificación de documentos administrativo-académicos mediante CNN
+            Tesis de pregrado 2025 | Clasificación de Resoluciones Decanales mediante CNN
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <script>
-        const CATS = ["Certificados de Estudios","Constancias Académicas","Trámites de Convalidación","Trámites de Grados y Títulos","Solicitudes Administrativas Generales"];
+        const CATS = ["Grados Académicos y Títulos Profesionales","Gestión Académica, Económica y Normativa General","Trámites de Matrícula","Rectificación y Protección de Datos Personales","Gestión de Personal Docente y Administrativo"];
         const BADGE_COLORS = ["#731E19","#A54A3F","#B8902E","#1B7A72","#2E5B99"];
         const ejemplos = {
-            "Certificados de Estudios": [
-                "Solicito la emisión del certificado de estudios correspondiente a los ciclos I al VI de la carrera de Ingeniería de Sistemas, para trámite de homologación en universidad extranjera.",
-                "Solicito certificado de estudios oficial con sello de la facultad para presentar en proceso de admisión a maestría.",
-                "Requiero copia certificada de mi certificado de estudios, ya que el documento original fue extraviado."
+            "Grados Académicos y Títulos Profesionales": [
+                "VISTO, el expediente digital N.° UNMSM-20230098765 de fecha 10 de abril de 2023, referente al Grado Académico de Bachiller, y;\nCONSIDERANDO:\nQue mediante Ley N.° 30220-Ley Universitaria vigente a partir del 2014, señalan para la Obtención de los Grados Académicos y Títulos Profesionales que emitan en Universidades, aplicable a los alumnos que ingresan a partir de su vigencia;\nQue con la Resolución Rectoral N.° 04923-R-16, delega competencia a los señores Decanos para que aprueben los Grados Académicos de Bachiller, Magíster, Doctorado, así como los Título Profesionales de Licenciado o equivalentes y los de Segunda Especialidad que aprueben en las facultades, de conformidad con la norma legal vigente;\nQue mediante Constancia de Expedito de la Escuela Profesional de Ingeniería de Sistemas e Informe de la Comisión Permanente de Grados, Títulos y Convalidaciones, remite el expediente del egresado, quien ha cumplido con los requisitos estatutarios y reglamentarios para otorgarle el Grado Académico de Bachiller;\nEstando dentro de las atribuciones conferidas al señor Decano de la Facultad de Ingeniería de Sistemas e Informática, por la Ley Universitaria N.° 30220 y el Estatuto de la Universidad;\nSE RESUELVE:\n1. Otorgar, el GRADO ACADÉMICO DE BACHILLER EN INGENIERÍA DE SISTEMAS, al egresado, con código de matrícula correspondiente.\n2. Elevar la presente Resolución de Decanato al Rectorado de la Universidad Nacional Mayor de San Marcos, para su ratificación."
             ],
-            "Constancias Académicas": [
-                "Solicito constancia de matrícula del ciclo 2026-I para trámite de beca externa.",
-                "Solicito constancia de notas del ciclo 2025-II para presentar ante mi centro de trabajo.",
-                "Pido constancia de orden de mérito correspondiente al décimo ciclo de la carrera de Ingeniería de Sistemas."
+            "Gestión Académica, Económica y Normativa General": [
+                "VISTO, el expediente de fecha 12 de enero de 2023, referente a la designación del Jefe de la Unidad de Tecnología Educativa de la Facultad de Ingeniería de Sistemas e Informática, y;\nCONSIDERANDO:\nQue de conformidad con el Reglamento de Organización y Funciones de la Facultad, corresponde al señor Decano designar a los Jefes de las Unidades que conforman la estructura administrativa de la Facultad;\nQue existe la necesidad institucional de cubrir el cargo de Jefe de la Unidad de Tecnología Educativa para garantizar la continuidad de las actividades académicas y administrativas a su cargo;\nQue el personal propuesto cuenta con el perfil profesional requerido para el desempeño del cargo;\nEstando dentro de las atribuciones conferidas al señor Decano de la Facultad de Ingeniería de Sistemas e Informática;\nSE RESUELVE:\n1. Designar, a partir de la fecha de la presente resolución, al Jefe de la Unidad de Tecnología Educativa, Nivel F-2, de la Facultad de Ingeniería de Sistemas e Informática.\n2. Poner la presente Resolución en conocimiento de las instancias correspondientes para los fines pertinentes."
             ],
-            "Trámites de Convalidación": [
-                "Solicito la convalidación del curso de Cálculo I llevado en la Universidad Nacional de Ingeniería, cursado en el ciclo 2023-I.",
-                "Solicito convalidación de cursos aprobados en programa de intercambio en la Universidad de Chile.",
-                "Pido evaluación y convalidación de la asignatura de Física General II proveniente de traslado externo."
+            "Trámites de Matrícula": [
+                "Visto, el expediente digital con Registro N.° UNMSM-20230012345, de fecha 15 de marzo del 2023, presentado por el alumno interesado, a la Facultad de Ingeniería de Sistemas e Informática sobre reactualización de matrícula en el Semestre Académico 2023-I.\nCONSIDERANDO:\nQue con Resolución Rectoral N.° 01163-R-17 de fecha 06 de marzo de 2017, rectificada con Resolución Rectoral N.° 01286-R-17 de fecha 14 de marzo de 2017, se aprobó el Reglamento General de Matrícula que en su artículo 13, literal i), establece que la reactualización de matrícula es el procedimiento que restablece a la condición de estudiante regular a quien dejó de matricularse un semestre académico o más, teniendo como plazo límite tres años; y, en el artículo 31, que toda reactualización de matrícula se hace en función al plan de estudios vigente de cada escuela profesional, que se autoriza mediante resolución de decanato y se ejecuta durante la matrícula regular;\nQue, mediante informe de la Unidad de Matrícula, Registros Académicos, Grados y Títulos, se da conformidad a la solicitud presentada por cumplir con los requisitos reglamentarios;\nEstando dentro de las atribuciones conferidas al señor Decano de la Facultad de Ingeniería de Sistemas e Informática;\nSE RESUELVE:\n1. Autorizar la reactualización de matrícula para el Semestre Académico 2023-I a favor del alumno de la Escuela Profesional de Ingeniería de Sistemas de la Facultad de Ingeniería de Sistemas e Informática de la Universidad Nacional Mayor de San Marcos.\n2. Encargar a la Unidad de Matrícula, Registros Académicos, Grados y Títulos el cumplimiento de la presente resolución."
             ],
-            "Trámites de Grados y Títulos": [
-                "Solicito la inscripción de mi expediente para optar el título profesional de Ingeniero de Sistemas.",
-                "Pido programación de fecha de sustentación de tesis para la obtención del título profesional.",
-                "Solicito el grado académico de Bachiller en Ingeniería de Sistemas, habiendo cumplido con los requisitos establecidos."
+            "Rectificación y Protección de Datos Personales": [
+                "VISTO, el expediente digital de fecha 20 de febrero de 2023, mediante el cual un alumno de la Facultad de Ingeniería de Sistemas e Informática solicita rectificación de datos personales, y;\nCONSIDERANDO:\nQue el administrado tiene derecho a solicitar la rectificación de sus datos personales consignados erróneamente en los documentos oficiales de la Universidad, conforme a lo establecido en la Ley N.° 29733, Ley de Protección de Datos Personales;\nQue mediante el documento de identidad presentado se acredita la discrepancia entre el nombre consignado en los registros académicos y el nombre real del administrado;\nQue la Oficina de Registros Académicos ha verificado la documentación sustentatoria y encuentra procedente la rectificación solicitada;\nEstando dentro de las atribuciones conferidas al señor Decano de la Facultad de Ingeniería de Sistemas e Informática;\nSE RESUELVE:\n1. Rectificar, los datos personales en todos los documentos de la Universidad Nacional Mayor de San Marcos, por las consideraciones señaladas respecto al alumno con el código de matrícula correspondiente, en los términos indicados en el expediente.\n2. Elevar la presente Resolución de Decanato al Rectorado de la Universidad Nacional Mayor de San Marcos, para su ratificación."
             ],
-            "Solicitudes Administrativas Generales": [
-                "Solicito la rectificación de mis datos personales en el sistema académico debido a un error en el número de documento de identidad.",
-                "Pido la emisión de un duplicado de carné universitario por pérdida del documento original.",
-                "Solicito autorización para reserva de matrícula del ciclo 2026-I por motivos de salud."
+            "Gestión de Personal Docente y Administrativo": [
+                "VISTO, el expediente de fecha 5 de enero de 2023, mediante el cual se solicita en vía de regularización el cambio de clase docente, y;\nCONSIDERANDO:\nQue conforme a la normativa vigente de la Universidad, corresponde a cada Facultad evaluar y aprobar los cambios de dedicación del personal docente, considerando las necesidades académicas del Departamento correspondiente;\nQue el profesor del Departamento Académico de Ciencias de la Computación de la Facultad de Ingeniería de Sistemas e Informática cumple con los requisitos establecidos para el cambio solicitado;\nQue la Comisión de Gestión de Recursos Humanos emitió opinión favorable respecto a la procedencia del cambio de clase;\nEstando dentro de las atribuciones conferidas al señor Decano de la Facultad de Ingeniería de Sistemas e Informática;\nSE RESUELVE:\n1. Aprobar, en vía de regularización, el Cambio de Clase Docente manteniendo la categoría del profesor del Departamento Académico de Ciencias de la Computación de la Facultad de Ingeniería de Sistemas e Informática: Profesor principal, de Tiempo Parcial 20 horas, a Dedicación Exclusiva 40 horas.\n2. El cambio de clase indicado en el artículo precedente rige a partir de la fecha de la presente resolución."
             ]
         };
         let categoriasEdit = [];

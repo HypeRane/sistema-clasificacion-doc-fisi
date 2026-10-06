@@ -11,7 +11,15 @@ import main
 
 client = TestClient(main.app)
 
-TEXTO_EJEMPLO = "Solicito constancia de matrícula del ciclo 2026-I para trámite de beca externa."
+TEXTO_EJEMPLO = (
+    "VISTO, el expediente digital de fecha 15 de marzo de 2023, presentado por el alumno "
+    "interesado, a la Facultad de Ingeniería de Sistemas e Informática sobre reactualización "
+    "de matrícula en el Semestre Académico 2023-I. CONSIDERANDO: Que con Resolución Rectoral "
+    "N.° 01163-R-17 se aprobó el Reglamento General de Matrícula que establece el procedimiento "
+    "de reactualización de matrícula para estudiantes regulares. SE RESUELVE: Autorizar la "
+    "reactualización de matrícula para el Semestre Académico 2023-I a favor del alumno de la "
+    "Escuela Profesional de Ingeniería de Sistemas."
+)
 
 
 def test_01_estado_reporta_sistema_activo():
@@ -41,7 +49,7 @@ def test_04_historial_incluye_el_documento_clasificado():
     assert r.status_code == 200
     historial = r.json()
     assert len(historial) >= 1
-    assert historial[0]["texto_fragmento"].startswith("Solicito constancia de matrícula")
+    assert historial[0]["texto_fragmento"].startswith("VISTO, el expediente digital")
 
 
 def test_05_historial_filtra_por_categoria_inexistente():
