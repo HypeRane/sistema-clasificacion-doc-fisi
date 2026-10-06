@@ -5,7 +5,7 @@ Universidad Nacional Mayor de San Marcos — FISI
 Autor: Ortiz Herrera, Fabrizio Peter
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -19,6 +19,7 @@ import json
 import csv
 import io
 import sqlite3
+import pdfplumber
 
 app = FastAPI(
     title="Sistema de Clasificación Automatizada de Resoluciones Decanales",
@@ -159,6 +160,39 @@ def estado():
             "estado": "activo", "version": "1.2.0", "documentacion": "/docs"}
 
 
+def _clasificar_y_registrar(texto: str) -> ResultadoClasificacion:
+    """Lógica común de clasificación + registro en historial, usada por /clasificar y /clasificar-archivo."""
+    if len(texto.strip()) < 10:
+        raise HTTPException(status_code=422, detail="El texto extraído debe tener al menos 10 caracteres.")
+
+    inicio = time.perf_counter()
+    resultado = clasificar(texto, modelo_cnn, vectorizer)
+    tiempo_ms = round((time.perf_counter() - inicio) * 1000, 2)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    categoria_id = resultado["categoria_id"]
+    categoria_nombre = nombre_categoria(categoria_id)
+    texto_fragmento = texto[:80] + "..." if len(texto) > 80 else texto
+
+    conn = obtener_conexion()
+    conn.execute(
+        "INSERT INTO documentos (texto_fragmento, categoria_id, score_confianza, alerta_revision_manual, "
+        "tiempo_inferencia_ms, terminos_clave, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (texto_fragmento, categoria_id, resultado["score_confianza"], int(resultado["alerta_revision_manual"]),
+         tiempo_ms, ",".join(resultado["terminos_clave"]), timestamp)
+    )
+    conn.commit()
+    conn.close()
+
+    return ResultadoClasificacion(
+        categoria=categoria_nombre,
+        score_confianza=resultado["score_confianza"],
+        alerta_revision_manual=resultado["alerta_revision_manual"],
+        terminos_clave=resultado["terminos_clave"],
+        tiempo_inferencia_ms=tiempo_ms,
+        timestamp=timestamp
+    )
+
+
 @app.post("/clasificar", response_model=ResultadoClasificacion, tags=["Clasificación"])
 def clasificar_documento(documento: DocumentoEntrada):
     """
@@ -171,32 +205,43 @@ def clasificar_documento(documento: DocumentoEntrada):
     - Si el score es menor a 0.60, genera una **alerta de revisión manual**
     """
     try:
-        inicio = time.perf_counter()
-        resultado = clasificar(documento.texto, modelo_cnn, vectorizer)
-        tiempo_ms = round((time.perf_counter() - inicio) * 1000, 2)
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        categoria_id = resultado["categoria_id"]
-        categoria_nombre = nombre_categoria(categoria_id)
-        texto_fragmento = documento.texto[:80] + "..." if len(documento.texto) > 80 else documento.texto
+        return _clasificar_y_registrar(documento.texto)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al clasificar: {str(e)}")
 
-        conn = obtener_conexion()
-        conn.execute(
-            "INSERT INTO documentos (texto_fragmento, categoria_id, score_confianza, alerta_revision_manual, "
-            "tiempo_inferencia_ms, terminos_clave, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (texto_fragmento, categoria_id, resultado["score_confianza"], int(resultado["alerta_revision_manual"]),
-             tiempo_ms, ",".join(resultado["terminos_clave"]), timestamp)
-        )
-        conn.commit()
-        conn.close()
 
-        return ResultadoClasificacion(
-            categoria=categoria_nombre,
-            score_confianza=resultado["score_confianza"],
-            alerta_revision_manual=resultado["alerta_revision_manual"],
-            terminos_clave=resultado["terminos_clave"],
-            tiempo_inferencia_ms=tiempo_ms,
-            timestamp=timestamp
-        )
+@app.post("/clasificar-archivo", response_model=ResultadoClasificacion, tags=["Clasificación"])
+def clasificar_archivo(archivo: UploadFile = File(...)):
+    """
+    Clasifica un documento a partir de un archivo subido (PDF o TXT), en vez de texto pegado.
+
+    - Acepta archivos **.pdf** (se extrae el texto con pdfplumber) o **.txt** (UTF-8)
+    - El resto del comportamiento es idéntico a **POST /clasificar**
+    """
+    nombre = (archivo.filename or "").lower()
+    if not (nombre.endswith(".pdf") or nombre.endswith(".txt")):
+        raise HTTPException(status_code=415, detail="Solo se aceptan archivos .pdf o .txt.")
+
+    contenido = archivo.file.read()
+    try:
+        if nombre.endswith(".pdf"):
+            with pdfplumber.open(io.BytesIO(contenido)) as pdf:
+                texto = "\n".join(p.extract_text() or "" for p in pdf.pages)
+        else:
+            texto = contenido.decode("utf-8", errors="replace")
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"No se pudo leer el archivo: {str(e)}")
+
+    if len(texto.strip()) < 10:
+        raise HTTPException(status_code=422, detail=
+            "No se pudo extraer texto útil del archivo (¿es un PDF escaneado sin capa de texto?).")
+
+    try:
+        return _clasificar_y_registrar(texto)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al clasificar: {str(e)}")
 
@@ -370,6 +415,9 @@ HTML_INTERFAZ = r"""
         textarea { width: 100%; min-height: 110px; padding: 14px; border: 2px solid var(--gris-borde); border-radius: 10px; font-size: 0.95rem; font-family: inherit; resize: vertical; transition: border 0.2s; }
         textarea:focus { outline: none; border-color: var(--guinda-claro); }
         .ejemplos-grupo { margin: 14px 0; }
+        .archivo-grupo { margin: 14px 0; text-align: center; }
+        .archivo-grupo .titulo-grupo { text-align: center; }
+        #archivoInput { font-size: 0.85rem; }
         .titulo-grupo { font-size: 0.78rem; color: #888; margin-bottom: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
         .ejemplos { display: flex; flex-wrap: wrap; gap: 8px; }
         .ejemplo-btn { background: #F5E9E7; border: 1px solid #E0C6C2; color: var(--guinda); padding: 6px 12px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; transition: all 0.2s; }
@@ -437,6 +485,10 @@ HTML_INTERFAZ = r"""
                 <div class="ejemplos" id="ejemplosContainer"></div>
             </div>
             <button class="btn-clasificar" onclick="clasificar()">Clasificar Documento</button>
+            <div class="archivo-grupo">
+                <div class="titulo-grupo">— o suba un archivo (.pdf o .txt) —</div>
+                <input type="file" id="archivoInput" accept=".pdf,.txt" onchange="clasificarArchivo()">
+            </div>
             <div class="loading" id="loading">Procesando con la red neuronal...</div>
             <div class="resultado" id="resultado">
                 <h3 id="categoria"></h3>
@@ -535,6 +587,31 @@ HTML_INTERFAZ = r"""
             const cats = Object.keys(ejemplos);
             usarEjemplo(cats[Math.floor(Math.random() * cats.length)]);
         }
+        function mostrarResultado(data) {
+            const resultado = document.getElementById('resultado');
+            const score = Math.round(data.score_confianza * 100);
+            document.getElementById('categoria').textContent = data.categoria;
+            document.getElementById('tiempoInfo').textContent = 'Clasificado en ' + data.tiempo_inferencia_ms + ' ms';
+            const fill = document.getElementById('scoreFill');
+            fill.style.width = score + '%';
+            fill.textContent = score + '%';
+            if (data.alerta_revision_manual) {
+                resultado.className = 'resultado alerta'; fill.className = 'score-fill bajo';
+                document.getElementById('alertaMsg').textContent = 'Score inferior al umbral de 0.60. Requiere revisión manual.';
+            } else if (score < 75) {
+                resultado.className = 'resultado dudoso'; fill.className = 'score-fill medio';
+                document.getElementById('alertaMsg').textContent = 'Clasificación aceptable pero con confianza moderada.';
+            } else {
+                resultado.className = 'resultado exito'; fill.className = 'score-fill alto';
+                document.getElementById('alertaMsg').textContent = 'Clasificación confiable. Documento categorizado automáticamente.';
+            }
+            const terms = data.terminos_clave || [];
+            document.getElementById('terminosClave').innerHTML = terms.length
+                ? '<p style="font-size:0.8rem;color:#666;margin:10px 0 6px;">Términos que más influyeron:</p>' + terms.map(t => '<span class="chip">' + t + '</span>').join('')
+                : '';
+            resultado.style.display = 'block';
+            actualizarTodo();
+        }
         async function clasificar() {
             const texto = document.getElementById('texto').value.trim();
             if (texto.length < 10) { alert('Escriba un texto de al menos 10 caracteres.'); return; }
@@ -544,32 +621,32 @@ HTML_INTERFAZ = r"""
                 const resp = await fetch('/clasificar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ texto: texto }) });
                 const data = await resp.json();
                 document.getElementById('loading').style.display = 'none';
-                const resultado = document.getElementById('resultado');
-                const score = Math.round(data.score_confianza * 100);
-                document.getElementById('categoria').textContent = data.categoria;
-                document.getElementById('tiempoInfo').textContent = 'Clasificado en ' + data.tiempo_inferencia_ms + ' ms';
-                const fill = document.getElementById('scoreFill');
-                fill.style.width = score + '%';
-                fill.textContent = score + '%';
-                if (data.alerta_revision_manual) {
-                    resultado.className = 'resultado alerta'; fill.className = 'score-fill bajo';
-                    document.getElementById('alertaMsg').textContent = 'Score inferior al umbral de 0.60. Requiere revisión manual.';
-                } else if (score < 75) {
-                    resultado.className = 'resultado dudoso'; fill.className = 'score-fill medio';
-                    document.getElementById('alertaMsg').textContent = 'Clasificación aceptable pero con confianza moderada.';
-                } else {
-                    resultado.className = 'resultado exito'; fill.className = 'score-fill alto';
-                    document.getElementById('alertaMsg').textContent = 'Clasificación confiable. Documento categorizado automáticamente.';
-                }
-                const terms = data.terminos_clave || [];
-                document.getElementById('terminosClave').innerHTML = terms.length
-                    ? '<p style="font-size:0.8rem;color:#666;margin:10px 0 6px;">Términos que más influyeron:</p>' + terms.map(t => '<span class="chip">' + t + '</span>').join('')
-                    : '';
-                resultado.style.display = 'block';
-                actualizarTodo();
+                if (!resp.ok) { alert(data.detail || 'Error al clasificar.'); return; }
+                mostrarResultado(data);
             } catch (e) {
                 document.getElementById('loading').style.display = 'none';
                 alert('Error al clasificar: ' + e);
+            }
+        }
+        async function clasificarArchivo() {
+            const input = document.getElementById('archivoInput');
+            const archivo = input.files[0];
+            if (!archivo) return;
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('resultado').style.display = 'none';
+            try {
+                const formData = new FormData();
+                formData.append('archivo', archivo);
+                const resp = await fetch('/clasificar-archivo', { method: 'POST', body: formData });
+                const data = await resp.json();
+                document.getElementById('loading').style.display = 'none';
+                if (!resp.ok) { alert(data.detail || 'Error al clasificar el archivo.'); return; }
+                mostrarResultado(data);
+            } catch (e) {
+                document.getElementById('loading').style.display = 'none';
+                alert('Error al clasificar el archivo: ' + e);
+            } finally {
+                input.value = '';
             }
         }
         function actualizarGraficoDistribucion(dist, cats) {

@@ -100,3 +100,26 @@ def test_11_historial_exportar_devuelve_csv():
     assert r.status_code == 200
     assert "text/csv" in r.headers["content-type"]
     assert "texto_fragmento" in r.text
+
+
+def test_12_clasificar_archivo_txt_valido():
+    # Nota: para este punto test_10 ya renombró las categorías activas, así que
+    # no se compara contra main.CATEGORIAS (la lista original fija del modelo).
+    archivo = ("resolucion.txt", TEXTO_EJEMPLO.encode("utf-8"), "text/plain")
+    r = client.post("/clasificar-archivo", files={"archivo": archivo})
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data["categoria"], str) and data["categoria"]
+    assert isinstance(data["terminos_clave"], list)
+
+
+def test_13_clasificar_archivo_rechaza_extension_invalida():
+    archivo = ("resolucion.docx", b"contenido irrelevante", "application/octet-stream")
+    r = client.post("/clasificar-archivo", files={"archivo": archivo})
+    assert r.status_code == 415
+
+
+def test_14_clasificar_archivo_rechaza_texto_insuficiente():
+    archivo = ("vacio.txt", b"ab", "text/plain")
+    r = client.post("/clasificar-archivo", files={"archivo": archivo})
+    assert r.status_code == 422

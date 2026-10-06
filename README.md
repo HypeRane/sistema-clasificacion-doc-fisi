@@ -98,7 +98,8 @@ Incluye pruebas de la arquitectura CNN y la lógica de inferencia (`tests/test_m
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| `POST` | `/clasificar` | Clasifica un documento administrativo-académico |
+| `POST` | `/clasificar` | Clasifica un documento a partir de texto pegado |
+| `POST` | `/clasificar-archivo` | Clasifica un documento a partir de un archivo subido (.pdf o .txt) |
 | `GET` | `/historial` | Historial de documentos procesados |
 | `GET` | `/historial/exportar` | Exporta el historial completo como CSV |
 | `GET` | `/metricas` | Métricas de rendimiento del sistema |
